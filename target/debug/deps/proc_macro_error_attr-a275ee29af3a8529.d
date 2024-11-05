@@ -1,0 +1,7 @@
+/home/ronaldsonbellande-hplaptop/Desktop/Algorithms_Architecture/bell/target/debug/deps/libproc_macro_error_attr-a275ee29af3a8529.so: /home/ronaldsonbellande-hplaptop/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro-error-attr-1.0.4/src/lib.rs /home/ronaldsonbellande-hplaptop/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro-error-attr-1.0.4/src/parse.rs /home/ronaldsonbellande-hplaptop/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro-error-attr-1.0.4/src/settings.rs
+
+/home/ronaldsonbellande-hplaptop/Desktop/Algorithms_Architecture/bell/target/debug/deps/proc_macro_error_attr-a275ee29af3a8529.d: /home/ronaldsonbellande-hplaptop/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro-error-attr-1.0.4/src/lib.rs /home/ronaldsonbellande-hplaptop/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro-error-attr-1.0.4/src/parse.rs /home/ronaldsonbellande-hplaptop/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro-error-attr-1.0.4/src/settings.rs
+
+/home/ronaldsonbellande-hplaptop/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro-error-attr-1.0.4/src/lib.rs:
+/home/ronaldsonbellande-hplaptop/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro-error-attr-1.0.4/src/parse.rs:
+/home/ronaldsonbellande-hplaptop/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro-error-attr-1.0.4/src/settings.rs:

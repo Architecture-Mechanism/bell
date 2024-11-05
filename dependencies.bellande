@@ -1,0 +1,4 @@
+glob: "0.3.0"
+tempfile: "3.2"
+shellexpand: "3.1.0"
+meval: "0.2"
