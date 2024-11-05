@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime};
 use tokio::process::Command as TokioCommand;
 
 use anyhow::{Context, Result};
-use libseccomp::{ScmpAction, ScmpFilterContext};
+use libseccomp::ScmpFilterContext;
 use nix::unistd::{Gid, Uid};
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
@@ -56,6 +56,15 @@ struct CommandContext {
 struct DangerousPattern {
     pattern: String,
     description: String,
+}
+
+impl From<(&str, &str)> for DangerousPattern {
+    fn from((pattern, description): (&str, &str)) -> Self {
+        DangerousPattern {
+            pattern: pattern.to_string(),
+            description: description.to_string(),
+        }
+    }
 }
 
 // Implementation for command validation and execution
@@ -134,7 +143,7 @@ async fn check_session_and_permissions(
 
     // Check network access if required by command config
     if cmd_config.network_isolation_required {
-        check_network_access(session, command, args).await?;
+        check_network_access(config, session, command, args).await?;
     }
 
     Ok(())
@@ -223,30 +232,18 @@ async fn check_command_permissions(
     Ok(true) // Return Ok(true) if all checks pass
 }
 
-async fn check_network_access(session: &Session, command: &str, args: &[String]) -> Result<bool> {
-    // Get current IP and check against allowed networks
-    let ip = match local_ip_address::local_ip() {
-        Ok(ip) => ip,
-        Err(e) => {
-            log_audit_event(
-                "NETWORK_ERROR",
-                &session.user.username,
-                &format!("Failed to get local IP: {}", e),
-            )
-            .await?;
-            return Ok(false);
-        }
-    };
-
-    // Check if IP is allowed
-    if !is_network_allowed(&ip).await? {
+async fn check_network_access(
+    config: &Config,
+    session: &Session,
+    command: &str,
+    args: &[String],
+) -> Result<bool> {
+    // Use is_network_allowed directly with the config
+    if !is_network_allowed(config).await? {
         log_audit_event(
             "NETWORK_DENIED",
             &session.user.username,
-            &format!(
-                "Network access denied for: {} {:?} from IP: {}",
-                command, args, ip
-            ),
+            &format!("Network access denied for: {} {:?}", command, args),
         )
         .await?;
         return Ok(false);
@@ -439,8 +436,9 @@ async fn process_command_output(ctx: &CommandContext, output: &std::process::Out
     Ok(())
 }
 
-fn create_sandbox() -> Result<ScmpFilterContext> {
-    let mut filter = ScmpFilterContext::new_filter(ScmpAction::Allow)?;
+fn create_sandbox() -> Result<syscallz::Context> {
+    // Create a new context with default action KILL
+    let mut ctx = syscallz::Context::init()?;
 
     // Essential system calls
     let essential_syscalls = [
@@ -487,18 +485,21 @@ fn create_sandbox() -> Result<ScmpFilterContext> {
         libc::SYS_geteuid,
     ];
 
+    // Allow the syscalls
     for syscall in essential_syscalls
         .iter()
         .chain(file_syscalls.iter())
         .chain(memory_syscalls.iter())
         .chain(process_syscalls.iter())
     {
-        filter
-            .add_rule(ScmpAction::Allow, *syscall)
+        ctx.allow_syscall(*syscall)
             .with_context(|| format!("Failed to add syscall rule: {}", syscall))?;
     }
 
-    Ok(filter)
+    // Load the filter
+    ctx.load()?;
+
+    Ok(ctx)
 }
 
 fn drop_privileges() -> Result<()> {
@@ -546,40 +547,41 @@ async fn check_dangerous_patterns(ctx: &CommandContext) -> Result<()> {
     Ok(())
 }
 
+fn convert_patterns<const N: usize>(patterns: [(&str, &str); N]) -> Vec<DangerousPattern> {
+    patterns.into_iter().map(DangerousPattern::from).collect()
+}
+
 async fn check_macos_specific_patterns(ctx: &CommandContext, command: &str) -> Result<()> {
-    let dangerous_patterns = [
+    let dangerous_patterns = convert_patterns([
         ("diskutil eraseDisk", "Disk erasure attempt"),
         ("csrutil disable", "SIP disable attempt"),
         ("nvram", "NVRAM modification attempt"),
         ("kextload", "Kernel extension loading attempt"),
         ("spctl --master-disable", "Gatekeeper disable attempt"),
-    ];
-
+    ]);
     check_patterns(ctx, command, &dangerous_patterns).await
 }
 
 async fn check_linux_specific_patterns(ctx: &CommandContext, command: &str) -> Result<()> {
-    let dangerous_patterns = [
+    let dangerous_patterns = convert_patterns([
         ("modprobe", "Kernel module loading attempt"),
         ("insmod", "Kernel module insertion attempt"),
         ("mount", "File system mounting attempt"),
         ("sysctl -w", "Sysctl modification attempt"),
         ("echo 1 > /proc/sys", "Sysctl modification attempt"),
         ("iptables -F", "Firewall flush attempt"),
-    ];
-
+    ]);
     check_patterns(ctx, command, &dangerous_patterns).await
 }
 
 async fn check_bellande_specific_patterns(ctx: &CommandContext, command: &str) -> Result<()> {
-    let dangerous_patterns = [
+    let dangerous_patterns = convert_patterns([
         ("bellctl system reset", "System reset attempt"),
         ("bellctl security disable", "Security disable attempt"),
         ("bellctl kernel modify", "Kernel modification attempt"),
         ("bellctl firewall disable", "Firewall disable attempt"),
         ("bellctl audit stop", "Audit stop attempt"),
-    ];
-
+    ]);
     check_patterns(ctx, command, &dangerous_patterns).await
 }
 
@@ -591,7 +593,7 @@ async fn check_patterns(
     for pattern in patterns {
         if command.contains(&pattern.pattern) {
             log_audit_event("DANGEROUS_COMMAND", &ctx.username, &pattern.description).await?;
-            return Err(anyhow::anyhow!(&pattern.description));
+            return Err(anyhow::anyhow!("Dangerous command pattern detected"));
         }
     }
     Ok(())

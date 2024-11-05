@@ -35,6 +35,7 @@ anyhow = "1.0"
 nix = "0.26.2"
 libc = { version = "0.2.144", features = ["extra_traits"] }
 libseccomp = "0.3"
+syscallz = "0.17"
 
 # Authentication and security
 totp-rs = { version = "5.0.2", features = ["gen_secret"] }

@@ -29,7 +29,7 @@ use tokio;
 use crate::authentication_compliance::authentication::{authenticate_user, RateLimiter, Session};
 use crate::command::command::run_command_with_privilege;
 use crate::config::config::Config;
-use crate::user_privilege::privilege::PrivilegeLevel;
+use crate::user_privilege::privilege::{PrivilegeConfig, PrivilegeLevel, PrivilegeManager};
 use crate::user_privilege::user::{
     add_user, add_user_to_group, change_password, change_privilege, remove_user,
     remove_user_from_group,
@@ -89,7 +89,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = Opt::from_args();
 
     let mut config = Config::load()?;
+    let privilege_config = PrivilegeConfig::from_config();
     let mut rate_limiter = RateLimiter::new(5, Duration::from_secs(60));
+    let privilege_manager = PrivilegeManager::new(&privilege_config);
 
     match opt {
         Opt::Run {
@@ -133,8 +135,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
 
-                run_command_with_privilege(&session, &command, &args, privilege_level, &config)
-                    .await?;
+                run_command_with_privilege(
+                    &session,
+                    &command,
+                    &args,
+                    privilege_level,
+                    &config,
+                    &privilege_manager,
+                )
+                .await?;
             } else {
                 println!("Authentication failed.");
             }

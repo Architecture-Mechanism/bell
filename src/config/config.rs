@@ -13,16 +13,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::fs::{self, OpenOptions};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use log::{error, info, warn};
+use log::warn;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::hsm::hsm::{decrypt_data, encrypt_data};
 use crate::user_privilege::user::User;
