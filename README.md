@@ -7,13 +7,13 @@ date: 2024
 ---
 
 ## Website Crates
-- https://crates.io/crates/bell
+- https://crates.io/crates/bell_system
 
 ### Installation
-- `cargo add bell`
+- `cargo add bell_system`
 
 ```
-Name: bell
+Name: bell_system
 Summary: Bell is a comprehensive privilege escalation system designed for secure command execution with granular access controls, robust auditing, and compliance features
 Home-page: github.com/Architecture-Mechanism/bell
 Author: Ronaldson Bellande
