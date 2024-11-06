@@ -6,6 +6,21 @@ version: 0.0.1
 date: 2024
 ---
 
+## Website Crates
+- https://crates.io/crates/bell
+
+### Installation
+- `cargo add bell`
+
+```
+Name: bell
+Summary: Bell is a comprehensive privilege escalation system designed for secure command execution with granular access controls, robust auditing, and compliance features
+Home-page: github.com/Architecture-Mechanism/bell
+Author: Ronaldson Bellande
+Author-email: ronaldsonbellande@gmail.com
+License: GNU General Public License v3.0
+```
+
 # Bell Privilege Escalation System
 
 Bell is a comprehensive privilege escalation system designed for secure command execution with granular access controls, robust auditing, and compliance features
@@ -374,5 +389,28 @@ EXAMPLES AND USE CASES
 - User can execute
 ```
 
+# Command Line 
+```
+bell [OPTIONS] COMMAND [ARGS]
+
+Commands:
+  run                Execute privileged command
+  user               User management
+  group              Group management
+  session            Session management
+  logs               Log management
+  debug              Debug tools
+  help               Show help information
+
+Options:
+  -d, --debug        Enable debug mode
+  -c, --config       Config file location
+  -q, --quiet        Suppress output
+  -v, --version      Show version
+  -h, --help         Show help
+```
 ## License
 Bell is distributed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html), see [LICENSE](https://github.com/Architecture-Mechanism/bell/blob/main/LICENSE) and [NOTICE](https://github.com/Architecture-Mechanism/bell/blob/main/LICENSE) for more information.
+
+## Code of Conduct
+Bell is distributed under the [CODE_OF_CONDUCT](https://github.com/Architecture-Mechanism/bell/blob/main/CODE_OF_CONDUCT.md) and [NOTICE](https://github.com/Architecture-Mechanism/bell/blob/main/CODE_OF_CONDUCT.md) for more information.
