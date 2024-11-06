@@ -1,5 +1,207 @@
 # bell
+---
+title: Bell Privilege Escalation System
+author: Bellande Architecture Mechanism Research Innovation Center
+version: 0.0.1
+date: 2024
+---
+
+# Bell Privilege Escalation System
+
 Bell is a comprehensive privilege escalation system designed for secure command execution with granular access controls, robust auditing, and compliance features
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Installation](#installation)
+3. [Usage](#usage)
+4. [Configuration](#configuration)
+5. [Security Features](#security-features)
+6. [OS-Specific Features](#os-specific-features)
+7. [Best Practices](#best-practices)
+8. [Troubleshooting](#troubleshooting)
+9. [API Reference](#api-reference)
+10. [License](#license)
+
+## Overview
+
+Bell is an advanced privilege escalation system designed for secure enterprise environments. It integrates hardware security modules, multi-factor authentication, and comprehensive audit logging.
+
+### Key Features
+
+* Multi-level privilege management
+* Hardware Security Module (HSM) integration
+* Two-factor authentication (TOTP)
+* Network isolation capabilities
+* Fine-grained access control
+* Comprehensive audit logging
+* Cross-platform support (Linux, MacOS, BellandeOS)
+
+### Architecture
+```
++------------------+     +------------------+     +------------------+
+|    Bell Client   | --> |    Bell Core    | --> |  Security Layer  |
++------------------+     +------------------+     +------------------+
+         |                       |                        |
+         v                       v                        v
++------------------+     +------------------+     +------------------+
+|   Auth Module    |     |    HSM Module   |     |   Audit Module   |
++------------------+     +------------------+     +------------------+
+```
+
+## Installation
+Prerequisites
+
+- Rust 1.70 or higher
+- OpenSSL development libraries
+- Hardware Security Module (optional)
+- TOTP device/app for 2FA
+
+git clone https://github.com/Architecture-Mechanism/bell.git
+cd bell-system
+
+# Build in release mode
+cargo build --release
+
+# Run tests
+cargo test --all-features
+
+# Install system-wide
+sudo make install
+
+
+## System Requirements
+
+### Hardware Requirements
+
+| Component | Minimum Specification |
+|-----------|---------------------|
+| CPU | x86_64 or ARM64 |
+| RAM | 512MB |
+| Disk Space | 1GB free |
+
+### Operating System Support
+
+| OS | Minimum Version |
+|----|----------------|
+| Linux | 4.19+ |
+| MacOS | 10.15+ |
+| BellandeOS | 0.1+ |
+
+# Running Commands
+```
+bell run --privilege-level <level> --command <command> --args <args...>
+bell run --privilege-level admin --command "/usr/bin/systemctl" --args "restart" "nginx"
+bell run --privilege-level root --command "/usr/bin/apt" --args "update"
+```
+# User Management
+## Adding Users
+
+```
+bell user add <username> --privilege <level>
+
+# Examples
+bell user add johndoe --privilege admin
+bell user add service-account --privilege user
+
+```
+## Modifying Users
+```
+# Change password
+bell user change-password <username>
+
+# Change privilege
+bell user change-privilege <username> <new-privilege>
+
+# Remove user
+bell user remove <username>
+```
+
+## Group Management
+```
+# Add to group
+bell user add-to-group <username> <group>
+
+# Remove from group
+bell user remove-from-group <username> <group>
+
+# List group members
+bell group list-members <group>
+```
+## File Locations
+```
+/etc/bell/
+├── config.bellande     # Main configuration
+├── users/              # User configurations
+│   ├── admin.bellande
+│   └── service.bellande
+├── groups/             # Group configurations
+│   ├── admins.bellande
+│   └── services.bellande
+└── security/           # Security policies
+    ├── policy.bellande
+    └── rules.bellande
+```
+
+## Section Management
+```
+# View active sessions
+bell session list
+
+# Terminate session
+bell session terminate <session-id>
+
+# Refresh session
+bell session refresh
+```
+
+## Log Management
+```
+# View logs
+bell logs view --level error --since "1 hour ago"
+
+# Export logs
+bell logs export --format json --start "2024-01-01" --end "2024-01-31"
+
+# Analyze logs
+bell logs analyze --pattern "failed_auth" --report detailed
+```
+
+## MacOS Intergration
+```
+# FileVault management
+bell run --privilege-level admin --command "fdesetup" --args "status"
+
+# SIP verification
+bell run --privilege-level bell --command "csrutil" --args "status"
+
+# Keychain access
+bell run --privilege-level admin --command "security" --args "list-keychains"
+```
+
+## Linux Security
+```
+# SELinux management
+bell run --privilege-level admin --command "semanage" --args "login" "-l"
+
+# AppArmor profiles
+bell run --privilege-level root --command "aa-status"
+
+# Kernel parameters
+bell run --privilege-level bell --command "sysctl" --args "-a"
+```
+
+## BellandeOS Features
+```
+# Security status
+bell run --privilege-level bell --command "bellctl" --args "security" "status"
+
+# Kernel protection
+bell run --privilege-level admin --command "bellctl" --args "kernel" "protect"
+
+# System integrity
+bell run --privilege-level root --command "bellctl" --args "verify" "system"
+```
 
 ## Bellande Operating System Access
 ```
