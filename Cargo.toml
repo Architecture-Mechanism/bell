@@ -9,7 +9,7 @@ repository = "https://github.com/Architecture-Mechanism/bell"
 documentation = "https://bellande-architecture-mechanism-research-innovation-center.org/bell/docs"
 readme = "README.md"
 keywords = ["privilege-escalation", "security", "authentication", "system", "bellande_bell_system"]
-categories = ["command-line-utilities", "security", "authentication", "bellandeos", "operating system"]
+categories = ["command-line-utilities", "authentication"]
 
 [lib]
 name = "bell"
