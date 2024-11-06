@@ -13,11 +13,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::Utc;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -30,7 +31,7 @@ use std::os::unix::fs::MetadataExt;
 use crate::audit::audit::log_audit_event;
 use crate::config::config::Config;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct NetworkRequirements {
     pub required_protocols: Vec<String>,
     pub minimum_networks: usize,
@@ -38,10 +39,11 @@ pub struct NetworkRequirements {
     pub required_encryption: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct ComplianceConfig {
     // Original fields
     pub min_password_length: usize,
+    pub min_password_entropy: f64,
     pub password_complexity_regex: String,
     pub critical_files: Vec<PathBuf>,
     pub required_services: Vec<String>,
@@ -74,18 +76,26 @@ impl Default for ComplianceConfig {
     fn default() -> Self {
         let security_paths = get_security_paths();
         let critical_files = security_paths.get("critical").cloned().unwrap_or_default();
-
         let services = get_security_services();
         let required_services = services.get("required").cloned().unwrap_or_default();
 
         ComplianceConfig {
             min_password_length: 12,
+            min_password_entropy: 50.0,
+            max_repeated_chars: 3,
+            password_max_days: 90,
+            password_min_days: 1,
+            password_warn_days: 7,
             password_complexity_regex: String::from(
                 r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{12,}$",
             ),
             critical_files,
             required_services,
-            required_kernel_params: get_required_kernel_params(),
+            // Fix the type mismatch by converting HashMap to Vec<String>
+            required_kernel_params: get_required_kernel_params()
+                .into_iter()
+                .map(|(key, value)| format!("{}={}", key, value))
+                .collect(),
             audit_file_hashes: PathBuf::from("audit_hashes.db"),
             network_requirements: NetworkRequirements {
                 required_protocols: vec![
@@ -717,11 +727,71 @@ async fn check_system_configurations(compliance_config: &ComplianceConfig) -> Re
     }
 
     // Check kernel parameters
-    for (param, expected_value) in &compliance_config.required_kernel_params {
-        check_kernel_parameter(param, expected_value).await?;
+    for param in &compliance_config.required_kernel_params {
+        let expected_value = get_expected_value(param)?;
+        check_kernel_parameter(param, &expected_value).await?;
     }
 
     Ok(())
+}
+
+async fn check_kernel_parameter(param: &str, expected_value: &str) -> Result<()> {
+    match std::env::consts::OS {
+        "linux" => {
+            let output = Command::new("sysctl")
+                .arg(param)
+                .output()
+                .context(format!("Failed to check kernel parameter: {}", param))?;
+            let value = String::from_utf8_lossy(&output.stdout);
+            if !value.contains(expected_value) {
+                log_audit_event(
+                    "COMPLIANCE_VIOLATION",
+                    "SYSTEM",
+                    &format!("Kernel parameter {} has incorrect value", param),
+                )
+                .await?;
+            }
+        }
+        "bellandeos" => {
+            let output = Command::new("bellctl")
+                .args(&["kernel", "param", param])
+                .output()
+                .context(format!("Failed to check BellandeOS parameter: {}", param))?;
+            let value = String::from_utf8_lossy(&output.stdout);
+            if !value.contains(expected_value) {
+                log_audit_event(
+                    "COMPLIANCE_VIOLATION",
+                    "SYSTEM",
+                    &format!("BellandeOS parameter {} has incorrect value", param),
+                )
+                .await?;
+            }
+        }
+        _ => warn!("Kernel parameter checking not implemented for this OS"),
+    }
+    Ok(())
+}
+
+fn get_expected_value(param: &str) -> Result<String> {
+    match param {
+        "kernel.randomize_va_space" => Ok("2".to_string()),
+        "net.ipv4.ip_forward" => Ok("0".to_string()),
+        "kernel.yama.ptrace_scope" => Ok("1".to_string()),
+        "kernel.kptr_restrict" => Ok("2".to_string()),
+        "net.ipv4.conf.all.accept_redirects" => Ok("0".to_string()),
+        "net.ipv4.conf.all.send_redirects" => Ok("0".to_string()),
+        _ => Ok("0".to_string()),
+    }
+}
+
+async fn get_kernel_parameter(param: &str) -> Result<String> {
+    match std::env::consts::OS {
+        "linux" => {
+            let path = format!("/proc/sys/{}", param.replace(".", "/"));
+            Ok(fs::read_to_string(path)?.trim().to_string())
+        }
+        _ => Ok("0".to_string()),
+    }
 }
 
 async fn check_audit_log_integrity(compliance_config: &ComplianceConfig) -> Result<()> {
@@ -1103,7 +1173,7 @@ async fn check_sysctl_settings() -> Result<()> {
             .output()
             .context(format!("Failed to check sysctl setting: {}", setting))?;
 
-        let value = String::from_utf8_lossy(&output.stdout).trim();
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if value != *expected_value {
             log_audit_event(
                 "COMPLIANCE_VIOLATION",
@@ -1181,7 +1251,7 @@ async fn check_bellande_security_policies() -> Result<()> {
             .output()
             .context(format!("Failed to check policy: {}", policy))?;
 
-        let value = String::from_utf8_lossy(&output.stdout).trim();
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if value != *expected_value {
             log_audit_event(
                 "COMPLIANCE_VIOLATION",
@@ -1219,45 +1289,6 @@ async fn is_service_running(service: &str) -> Result<bool> {
         }
         _ => Ok(false),
     }
-}
-
-async fn check_kernel_parameter(param: &str, expected_value: &str) -> Result<()> {
-    match std::env::consts::OS {
-        "linux" => {
-            let output = Command::new("sysctl")
-                .arg(param)
-                .output()
-                .context(format!("Failed to check kernel parameter: {}", param))?;
-
-            let value = String::from_utf8_lossy(&output.stdout);
-            if !value.contains(expected_value) {
-                log_audit_event(
-                    "COMPLIANCE_VIOLATION",
-                    "SYSTEM",
-                    &format!("Kernel parameter {} has incorrect value", param),
-                )
-                .await?;
-            }
-        }
-        "bellandeos" => {
-            let output = Command::new("bellctl")
-                .args(&["kernel", "param", param])
-                .output()
-                .context(format!("Failed to check BellandeOS parameter: {}", param))?;
-
-            let value = String::from_utf8_lossy(&output.stdout);
-            if !value.contains(expected_value) {
-                log_audit_event(
-                    "COMPLIANCE_VIOLATION",
-                    "SYSTEM",
-                    &format!("BellandeOS parameter {} has incorrect value", param),
-                )
-                .await?;
-            }
-        }
-        _ => warn!("Kernel parameter checking not implemented for this OS"),
-    }
-    Ok(())
 }
 
 async fn check_firewall_status() -> Result<()> {

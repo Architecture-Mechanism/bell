@@ -89,9 +89,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = Opt::from_args();
 
     let mut config = Config::load()?;
-    let privilege_config = PrivilegeConfig::from_config();
+    let privilege_config = PrivilegeConfig::default();
     let mut rate_limiter = RateLimiter::new(5, Duration::from_secs(60));
-    let privilege_manager = PrivilegeManager::new(&privilege_config);
+    let privilege_manager = PrivilegeManager::new(privilege_config);
 
     match opt {
         Opt::Run {
@@ -158,7 +158,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::io::stdin().read_line(&mut password)?;
                 let password = password.trim();
 
-                let privilege_level = PrivilegeLevel::from_str(&privilege)?;
+                let privilege_level = match privilege.as_str() {
+                    "bell" => PrivilegeLevel::Bell,
+                    "root" => PrivilegeLevel::Root,
+                    "admin" | "administrator" => PrivilegeLevel::Administrator,
+                    "user" => PrivilegeLevel::User,
+                    _ => {
+                        println!(
+                            "Invalid privilege level. Use 'bell', 'root', 'admin', or 'user'."
+                        );
+                        return Ok(());
+                    }
+                };
                 add_user(&mut config, &username, password, privilege_level).await?;
             }
             UserCommand::Remove { username } => {
@@ -176,7 +187,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 username,
                 privilege,
             } => {
-                let privilege_level = PrivilegeLevel::from_str(&privilege)?;
+                let privilege_level = match privilege.as_str() {
+                    "bell" => PrivilegeLevel::Bell,
+                    "root" => PrivilegeLevel::Root,
+                    "admin" | "administrator" => PrivilegeLevel::Administrator,
+                    "user" => PrivilegeLevel::User,
+                    _ => {
+                        println!(
+                            "Invalid privilege level. Use 'bell', 'root', 'admin', or 'user'."
+                        );
+                        return Ok(());
+                    }
+                };
                 change_privilege(&mut config, &username, privilege_level).await?;
             }
             UserCommand::AddToGroup { username, group } => {

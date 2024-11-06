@@ -806,3 +806,15 @@ async fn log_crypto_operation(operation: &str, data: &[u8]) -> Result<()> {
     );
     Ok(())
 }
+
+pub async fn encrypt_data(data: &str) -> anyhow::Result<String> {
+    let storage = SecureStorage::new().await?;
+    let encrypted = storage.encrypt_data(data).await?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&encrypted))
+}
+
+pub async fn decrypt_data(encrypted_data: &str) -> anyhow::Result<String> {
+    let storage = SecureStorage::new().await?;
+    let data = base64::engine::general_purpose::STANDARD.decode(encrypted_data)?;
+    storage.decrypt_data(&data).await
+}

@@ -13,13 +13,17 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use log::warn;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Runtime;
 
 use crate::hsm::hsm::{decrypt_data, encrypt_data};
 use crate::user_privilege::user::User;
@@ -64,29 +68,26 @@ pub struct SecuritySettings {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OsSpecificConfig {
-    #[serde(default)]
     pub macos: MacOSConfig,
-    #[serde(default)]
     pub linux: LinuxConfig,
-    #[serde(default)]
     pub bellandeos: BellandeOSConfig,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MacOSConfig {
     pub require_filevault: bool,
     pub require_sip: bool,
     pub allowed_applications: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct LinuxConfig {
     pub selinux_mode: String,
     pub require_apparmor: bool,
     pub kernel_hardening: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct BellandeOSConfig {
     pub security_level: String,
     pub require_secure_boot: bool,
@@ -169,56 +170,52 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let config_path = Self::get_config_path()?;
-        Self::ensure_directories_exist()?;
+        let rt = Runtime::new()?;
+        rt.block_on(async {
+            let config_path = Self::get_config_path()?;
+            Self::ensure_directories_exist()?;
 
-        // Read encrypted config
-        let encrypted_config =
-            fs::read_to_string(&config_path).context("Failed to read config file")?;
+            let encrypted_config =
+                fs::read_to_string(&config_path).context("Failed to read config file")?;
 
-        // Decrypt config
-        let decrypted_config =
-            decrypt_data(&encrypted_config).context("Failed to decrypt config file")?;
+            let decrypted_config = decrypt_data(&encrypted_config)
+                .await
+                .context("Failed to decrypt config file")?;
 
-        // Parse config
-        let mut config: Config =
-            toml::from_str(&decrypted_config).context("Failed to parse config file")?;
+            let mut config: Config =
+                toml::from_str(&decrypted_config).context("Failed to parse config file")?;
 
-        // Verify config integrity
-        config.verify_integrity()?;
+            config.verify_integrity()?;
+            config.update_os_settings()?;
 
-        // Update OS-specific settings
-        config.update_os_settings()?;
-
-        Ok(config)
+            Ok(config)
+        })
     }
 
     pub fn save(&self) -> Result<()> {
-        // Verify config before saving
-        self.verify_integrity()?;
+        let rt = Runtime::new()?;
+        rt.block_on(async {
+            self.verify_integrity()?;
+            self.create_backup().await?;
 
-        // Create backup
-        self.create_backup();
+            let config_str = toml::to_string(self).context("Failed to serialize config")?;
+            let encrypted_config = encrypt_data(&config_str)
+                .await
+                .context("Failed to encrypt config")?;
 
-        // Serialize config
-        let config_str = toml::to_string(self).context("Failed to serialize config")?;
+            let config_path = Self::get_config_path()?;
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .mode(0o600)
+                .open(&config_path)
+                .context("Failed to open config file for writing")?;
 
-        // Encrypt config
-        let encrypted_config = encrypt_data(&config_str).context("Failed to encrypt config")?;
+            file.write_all(encrypted_config.as_bytes())
+                .context("Failed to write config file")?;
 
-        // Save with proper permissions
-        let config_path = Self::get_config_path()?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .mode(0o600)
-            .open(&config_path)
-            .context("Failed to open config file for writing")?;
-
-        file.write_all(encrypted_config.as_bytes())
-            .context("Failed to write config file")?;
-
-        Ok(())
+            Ok(())
+        })
     }
 
     fn get_config_path() -> Result<PathBuf> {
@@ -236,12 +233,10 @@ impl Config {
     }
 
     fn verify_integrity(&self) -> Result<()> {
-        // Check required fields
         if self.users.is_empty() {
             warn!("No users defined in configuration");
         }
 
-        // Verify group permissions
         for group in &self.groups {
             for permission in &group.permissions {
                 if !is_valid_permission(permission) {
@@ -250,7 +245,6 @@ impl Config {
             }
         }
 
-        // Check for duplicate users
         let mut seen_users = HashSet::new();
         for user in &self.users {
             if !seen_users.insert(&user.username) {
@@ -269,7 +263,7 @@ impl Config {
             .join(format!("config_backup_{}.toml", timestamp));
 
         let config_str = toml::to_string(self)?;
-        let encrypted_backup = encrypt_data(&config_str)?;
+        let encrypted_backup = encrypt_data(&config_str).await?;
         fs::write(backup_path, encrypted_backup)?;
 
         Ok(())

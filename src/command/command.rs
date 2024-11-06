@@ -19,9 +19,9 @@ use std::time::{Duration, SystemTime};
 use tokio::process::Command as TokioCommand;
 
 use anyhow::{Context, Result};
-use libseccomp::ScmpFilterContext;
 use nix::unistd::{Gid, Uid};
 use serde::{Deserialize, Serialize};
+use syscallz::{Context as SyscallContext, Syscall};
 use tokio::time::timeout;
 
 use crate::audit::audit::log_audit_event;
@@ -41,6 +41,80 @@ pub struct CommandConfig {
     log_output: bool,
 }
 
+impl Default for CommandConfig {
+    fn default() -> Self {
+        let allowed_paths = match std::env::consts::OS {
+            "macos" => vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/usr/local/bin"),
+                PathBuf::from("/opt/homebrew/bin"),
+            ],
+            "linux" => vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/usr/local/bin"),
+                PathBuf::from("/bin"),
+            ],
+            "bellandeos" => vec![
+                PathBuf::from("/bell/bin"),
+                PathBuf::from("/bell/usr/bin"),
+                PathBuf::from("/bell/local/bin"),
+            ],
+            _ => vec![],
+        };
+
+        let mut dangerous_patterns = HashSet::new();
+        dangerous_patterns.insert("rm -rf /*".to_string());
+        dangerous_patterns.insert("chmod 777".to_string());
+        dangerous_patterns.insert("dd if=/dev/zero".to_string());
+        dangerous_patterns.insert("mkfs".to_string());
+        dangerous_patterns.insert("> /dev/sda".to_string());
+        dangerous_patterns.insert(":(){ :|:& };:".to_string()); // Fork bomb
+        dangerous_patterns.insert("sudo rm".to_string());
+        dangerous_patterns.insert("> /dev/null".to_string());
+
+        CommandConfig {
+            dangerous_patterns,
+            allowed_paths,
+            max_execution_time: Duration::from_secs(300),
+            sandbox_enabled: true,
+            network_isolation_required: true,
+            max_output_size: 1024 * 1024,
+            log_output: true,
+        }
+    }
+}
+
+// Create a wrapper that implements Debug
+struct SandboxContext {
+    inner: SyscallContext,
+}
+
+impl std::fmt::Debug for SandboxContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SandboxContext")
+            .field("inner", &"SyscallContext")
+            .finish()
+    }
+}
+
+impl SandboxContext {
+    fn new(context: SyscallContext) -> Self {
+        Self { inner: context }
+    }
+
+    fn load(&self) -> Result<()> {
+        self.inner
+            .load()
+            .map_err(|e| anyhow::anyhow!("Failed to load sandbox: {}", e))
+    }
+
+    fn allow_syscall(&mut self, syscall: Syscall) -> Result<()> {
+        self.inner
+            .allow_syscall(syscall)
+            .map_err(|e| anyhow::anyhow!("Failed to allow syscall: {}", e))
+    }
+}
+
 #[derive(Debug)]
 struct CommandContext {
     command: String,
@@ -48,7 +122,7 @@ struct CommandContext {
     privilege_level: PrivilegeLevel,
     username: String,
     start_time: SystemTime,
-    sandbox: Option<ScmpFilterContext>,
+    sandbox: Option<SandboxContext>,
     config: CommandConfig,
 }
 
@@ -343,49 +417,6 @@ async fn execute_command_with_timeout(ctx: &CommandContext) -> Result<std::proce
     Ok(output)
 }
 
-impl Default for CommandConfig {
-    fn default() -> Self {
-        let allowed_paths = match std::env::consts::OS {
-            "macos" => vec![
-                PathBuf::from("/usr/bin"),
-                PathBuf::from("/usr/local/bin"),
-                PathBuf::from("/opt/homebrew/bin"),
-            ],
-            "linux" => vec![
-                PathBuf::from("/usr/bin"),
-                PathBuf::from("/usr/local/bin"),
-                PathBuf::from("/bin"),
-            ],
-            "bellandeos" => vec![
-                PathBuf::from("/bell/bin"),
-                PathBuf::from("/bell/usr/bin"),
-                PathBuf::from("/bell/local/bin"),
-            ],
-            _ => vec![],
-        };
-
-        let mut dangerous_patterns = HashSet::new();
-        dangerous_patterns.insert("rm -rf /*".to_string());
-        dangerous_patterns.insert("chmod 777".to_string());
-        dangerous_patterns.insert("dd if=/dev/zero".to_string());
-        dangerous_patterns.insert("mkfs".to_string());
-        dangerous_patterns.insert("> /dev/sda".to_string());
-        dangerous_patterns.insert(":(){ :|:& };:".to_string()); // Fork bomb
-        dangerous_patterns.insert("sudo rm".to_string());
-        dangerous_patterns.insert("> /dev/null".to_string());
-
-        CommandConfig {
-            dangerous_patterns,
-            allowed_paths,
-            max_execution_time: Duration::from_secs(300),
-            sandbox_enabled: true,
-            network_isolation_required: true,
-            max_output_size: 1024 * 1024,
-            log_output: true,
-        }
-    }
-}
-
 async fn process_command_output(ctx: &CommandContext, output: &std::process::Output) -> Result<()> {
     // Check output size limits
     if output.stdout.len() > ctx.config.max_output_size
@@ -436,53 +467,54 @@ async fn process_command_output(ctx: &CommandContext, output: &std::process::Out
     Ok(())
 }
 
-fn create_sandbox() -> Result<syscallz::Context> {
-    // Create a new context with default action KILL
-    let mut ctx = syscallz::Context::init()?;
+fn create_sandbox() -> Result<SandboxContext> {
+    let mut ctx = SyscallContext::init()?;
+
+    use syscallz::Syscall;
 
     // Essential system calls
     let essential_syscalls = [
-        libc::SYS_read,
-        libc::SYS_write,
-        libc::SYS_exit,
-        libc::SYS_exit_group,
-        libc::SYS_brk,
-        libc::SYS_arch_prctl,
+        Syscall::read,
+        Syscall::write,
+        Syscall::exit,
+        Syscall::exit_group,
+        Syscall::brk,
+        Syscall::arch_prctl,
     ];
 
     // File operations
     let file_syscalls = [
-        libc::SYS_open,
-        libc::SYS_openat,
-        libc::SYS_close,
-        libc::SYS_access,
-        libc::SYS_getcwd,
-        libc::SYS_lseek,
-        libc::SYS_stat,
-        libc::SYS_fstat,
-        libc::SYS_lstat,
-        libc::SYS_readlink,
+        Syscall::open,
+        Syscall::openat,
+        Syscall::close,
+        Syscall::access,
+        Syscall::getcwd,
+        Syscall::lseek,
+        Syscall::stat,
+        Syscall::fstat,
+        Syscall::lstat,
+        Syscall::readlink,
     ];
 
     // Memory management
     let memory_syscalls = [
-        libc::SYS_mmap,
-        libc::SYS_munmap,
-        libc::SYS_mprotect,
-        libc::SYS_mremap,
+        Syscall::mmap,
+        Syscall::munmap,
+        Syscall::mprotect,
+        Syscall::mremap,
     ];
 
     // Process management
     let process_syscalls = [
-        libc::SYS_clone,
-        libc::SYS_fork,
-        libc::SYS_execve,
-        libc::SYS_kill,
-        libc::SYS_wait4,
-        libc::SYS_getpid,
-        libc::SYS_getppid,
-        libc::SYS_getuid,
-        libc::SYS_geteuid,
+        Syscall::clone,
+        Syscall::fork,
+        Syscall::execve,
+        Syscall::kill,
+        Syscall::wait4,
+        Syscall::getpid,
+        Syscall::getppid,
+        Syscall::getuid,
+        Syscall::geteuid,
     ];
 
     // Allow the syscalls
@@ -493,15 +525,11 @@ fn create_sandbox() -> Result<syscallz::Context> {
         .chain(process_syscalls.iter())
     {
         ctx.allow_syscall(*syscall)
-            .with_context(|| format!("Failed to add syscall rule: {}", syscall))?;
+            .with_context(|| format!("Failed to add syscall rule: {:?}", syscall))?;
     }
 
-    // Load the filter
-    ctx.load()?;
-
-    Ok(ctx)
+    Ok(SandboxContext::new(ctx))
 }
-
 fn drop_privileges() -> Result<()> {
     let nobody_uid = Uid::from_raw(65534); // nobody user
     let nobody_gid = Gid::from_raw(65534); // nobody group
